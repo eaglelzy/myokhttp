@@ -426,4 +426,15 @@ public final class Util {
   public static String format(String format, Object... args) {
     return String.format(Locale.US, format, args);
   }
+
+  public static <T> T checkNull(T t) {
+    return checkNull(t, "");
+  }
+
+  public static <T> T checkNull(T t, String message) {
+    if (t == null) {
+      throw new NullPointerException(message);
+    }
+    return t;
+  }
 }

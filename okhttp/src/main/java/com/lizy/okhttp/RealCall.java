@@ -2,6 +2,9 @@ package com.lizy.okhttp;
 
 import com.lizy.okhttp.internal.NamedRunnable;
 import com.lizy.okhttp.internal.cache.CacheInterceptor;
+import com.lizy.okhttp.internal.connection.ConnectionInterceptor;
+import com.lizy.okhttp.internal.connection.StreamAllocation;
+import com.lizy.okhttp.internal.http.BridgeInterceptor;
 import com.lizy.okhttp.internal.http.CallServerInterceptor;
 import com.lizy.okhttp.internal.http.RealInterceptorChain;
 import com.lizy.okhttp.internal.http.RetryAndFollowUpInterceptor;
@@ -19,6 +22,8 @@ final class RealCall implements Call {
 
     private final Request originalRequest;
     private final OkHttpClient client;
+
+    private RetryAndFollowUpInterceptor retryAndFollowUpInterceptor;
 
     public RealCall(OkHttpClient client, Request request) {
         this.client = client;
@@ -53,12 +58,15 @@ final class RealCall implements Call {
 
     private Response getResponseWithInterceptorChain() throws IOException {
         List<Interceptor> interceptors = new ArrayList<>();
-        interceptors.add(new RetryAndFollowUpInterceptor());
+        retryAndFollowUpInterceptor = new RetryAndFollowUpInterceptor(client);
+        interceptors.add(retryAndFollowUpInterceptor);
+        interceptors.add(new BridgeInterceptor());
         interceptors.add(new CacheInterceptor());
-        interceptors.add(new CallServerInterceptor());
+        interceptors.add(new ConnectionInterceptor(client));
+        interceptors.add(new CallServerInterceptor(false));
         Interceptor.Chain chain = new RealInterceptorChain(interceptors, originalRequest,
-                null, 0);
-        return chain.process(originalRequest);
+                null, 0, null, null);
+        return chain.proceed(originalRequest);
     }
 
     @Override
@@ -88,6 +96,10 @@ final class RealCall implements Call {
     @Override
     public Call clone() {
         return new RealCall(client, originalRequest);
+    }
+
+    StreamAllocation streamAllocation() {
+        return retryAndFollowUpInterceptor.streamAllocation();
     }
 
     final class AsyncCall extends NamedRunnable {

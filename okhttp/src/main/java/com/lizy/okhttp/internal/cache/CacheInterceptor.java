@@ -18,7 +18,7 @@ public final class CacheInterceptor implements Interceptor {
             System.out.println("cache hit!");
             return cacheResponse;
         }
-        Response response = chain.process(chain.request());
+        Response response = chain.proceed(chain.request());
         cacheResponse = response;
         return response;
     }

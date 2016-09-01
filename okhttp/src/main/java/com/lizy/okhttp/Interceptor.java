@@ -10,7 +10,7 @@ public interface Interceptor {
 
     interface Chain {
         Request request();
-        Response process(Request request) throws IOException;
+        Response proceed(Request request) throws IOException;
 
         Connection connection();
     }
