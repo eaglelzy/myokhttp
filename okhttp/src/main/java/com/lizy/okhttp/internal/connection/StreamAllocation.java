@@ -6,9 +6,11 @@ import com.lizy.okhttp.HttpCodec;
 import com.lizy.okhttp.OkHttpClient;
 import com.lizy.okhttp.Route;
 import com.lizy.okhttp.internal.Internal;
+import com.lizy.okhttp.internal.Util;
 import com.lizy.okhttp.internal.http1.Http1Codec;
 
 import java.io.IOException;
+import java.lang.ref.Reference;
 import java.lang.ref.WeakReference;
 import java.util.concurrent.TimeUnit;
 
@@ -21,6 +23,9 @@ public final class StreamAllocation {
     private final Address address;
     private final Object callStackTrace;
     private Route route;
+    private HttpCodec codec;
+    private boolean released;
+    private boolean canceled;
     private final RouteSelector routeSelector;
 
     private RealConnection connection;
@@ -58,7 +63,10 @@ public final class StreamAllocation {
             resultConnection.sink.timeout().timeout(readTimeout, TimeUnit.MILLISECONDS);
             resultCodec = new Http1Codec(client, this, resultConnection.source,
                     resultConnection.sink);
-            return resultCodec;
+            synchronized (connectionPool) {
+                codec = resultCodec;
+                return resultCodec;
+            }
         } catch (IOException e) {
             throw new RouteException(e);
         }
@@ -70,6 +78,18 @@ public final class StreamAllocation {
         while(true) {
             RealConnection candidate = findConnection(connectionTimeout, readTimeout,
                     writeTimeout, connectionRetryEnable);
+
+            synchronized (connectionPool) {
+                if (candidate.successCount == 0) {
+                    return candidate;
+                }
+            }
+
+            if (!candidate.isHealthy(doExtensiveHealthChecks)) {
+                noNewStreams();
+                continue;
+            }
+
             return candidate;
         }
     }
@@ -78,6 +98,10 @@ public final class StreamAllocation {
                   boolean connectionRetryEnable) throws IOException {
         Route selectedRoute;
         synchronized (connectionPool) {
+            if (released) throw new IllegalStateException("released!");
+            if (codec != null) throw new IllegalStateException("codec != null");
+            if (canceled) throw new IOException("Canceled!");
+
             RealConnection allocatedConntection = this.connection;
             if (allocatedConntection != null && !allocatedConntection.noNewStreams) {
                 return allocatedConntection;
@@ -105,6 +129,7 @@ public final class StreamAllocation {
             acquire(newConnection);
             Internal.instance.put(connectionPool, newConnection);
             this.connection = newConnection;
+            if (canceled) throw new IOException("Canceled");
         }
 
         newConnection.connect(connectionTimeout, readTimeout, writeTimeout, address.connectionSpecs(),
@@ -122,11 +147,50 @@ public final class StreamAllocation {
         deallocate(true, false, false);
     }
 
-    private void deallocate(boolean b, boolean b1, boolean b2) {
+    private void deallocate(boolean noNewStream, boolean released, boolean streamFinished) {
+        RealConnection connectionToClose = null;
+        synchronized (connectionPool) {
+            if (streamFinished) {
+                this.codec = null;
+            }
+            if (released) {
+                this.released = true;
+            }
+            if (connection != null) {
+                if (noNewStream) {
+                    connection.noNewStreams = true;
+                }
 
+                if (codec == null && (this.released || connection.noNewStreams)) {
+                    release(connection);
+                    if (connection.allocations.isEmpty()) {
+                        connection.idleAtNanos = System.nanoTime();
+                        if (Internal.instance.connectionBecameIdle(connectionPool, connection)) {
+                            connectionToClose = connection;
+                        }
+                    }
+                    connection = null;
+                }
+            }
+
+            if (connectionToClose != null) {
+                Util.closeQuietly(connectionToClose.socket());
+            }
+        }
     }
 
-    public void streamFinished(boolean b, Http1Codec httpCodec) {
+    private void release(RealConnection connection) {
+        for (int i = 0, size = connection.allocations.size(); i < size; i++) {
+            Reference<StreamAllocation> reference = connection.allocations.get(i);
+            if (reference.get() == this) {
+                connection.allocations.remove(reference);
+                return;
+            }
+        }
+        throw new IllegalStateException();
+    }
+
+    public void streamFinished(boolean noNewStreams, Http1Codec httpCodec) {
 
     }
 

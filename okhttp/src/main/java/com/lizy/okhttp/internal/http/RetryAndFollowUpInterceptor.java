@@ -1,6 +1,7 @@
 package com.lizy.okhttp.internal.http;
 
 import com.lizy.okhttp.Address;
+import com.lizy.okhttp.CertificatePinner;
 import com.lizy.okhttp.HttpUrl;
 import com.lizy.okhttp.Interceptor;
 import com.lizy.okhttp.OkHttpClient;
@@ -9,6 +10,9 @@ import com.lizy.okhttp.Response;
 import com.lizy.okhttp.internal.connection.StreamAllocation;
 
 import java.io.IOException;
+
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLSocketFactory;
 
 /**
  * Created by lizy on 16-8-30.
@@ -33,18 +37,19 @@ public final class RetryAndFollowUpInterceptor implements Interceptor {
     }
 
     private Address createAddress(HttpUrl url) {
-//        SSLSocketFactory sslSocketFactory = null;
-//        HostnameVerifier hostnameVerifier = null;
-//        CertificatePinner certificatePinner = null;
+        SSLSocketFactory sslSocketFactory = null;
+        HostnameVerifier hostnameVerifier = null;
+        CertificatePinner certificatePinner = null;
         if (url.isHttps()) {
-//            sslSocketFactory = client.sslSocketFactory();
-//            hostnameVerifier = client.hostnameVerifier();
-//            certificatePinner = client.certificatePinner();
+            sslSocketFactory = client.sslSocketFactory();
+            hostnameVerifier = client.hostnameVerifier();
+            certificatePinner = client.certificatePinner();
         }
 
         return new Address(url.host(), url.port(), client.dns(), client.socketFactory(),
                 client.authenticator(), client.protocols(), client.connectionSpecs(),
-                client.proxySelector(), client.proxy(), null, null, null);
+                client.proxySelector(), client.proxy(),
+                sslSocketFactory, hostnameVerifier, certificatePinner);
     }
 
     public StreamAllocation streamAllocation() {

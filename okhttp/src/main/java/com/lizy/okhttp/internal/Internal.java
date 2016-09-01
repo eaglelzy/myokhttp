@@ -44,6 +44,12 @@ public abstract class Internal {
 
   public static Internal instance;
 
+  public abstract void addLenient(Headers.Builder builder, String line);
+
+  public abstract void addLenient(Headers.Builder builder, String name, String value);
+
+//  public abstract void setCache(OkHttpClient.Builder builder, InternalCache internalCache);
+
   public abstract RealConnection get(
           ConnectionPool pool, Address address, StreamAllocation streamAllocation);
 
@@ -62,6 +68,4 @@ public abstract class Internal {
   public abstract StreamAllocation callEngineGetStreamAllocation(Call call);
 
   public abstract void setCallWebSocket(Call call);
-
-  public abstract void addLenient(Headers.Builder builder, String line);
 }

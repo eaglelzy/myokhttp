@@ -28,6 +28,7 @@ import okio.Sink;
 import okio.Source;
 import okio.Timeout;
 
+import static com.lizy.okhttp.internal.Util.checkOffsetAndCount;
 import static com.lizy.okhttp.internal.http.StatusLine.HTTP_CONTINUE;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -62,7 +63,99 @@ public class Http1Codec implements HttpCodec {
 
     @Override
     public Sink createRequestBody(Request request, long contentLength) {
-        return null;
+        if ("chunked".equalsIgnoreCase(request.header("Transfer-Encoding"))) {
+            return newChunkedSink();
+        }
+
+        if (contentLength != -1) {
+            return new FixedLengthSink(contentLength);
+        }
+
+        throw new IllegalStateException("cannot create request body without chunked encoding" +
+                    " or a unkown content length!");
+    }
+
+    public Sink newChunkedSink() {
+        if (state != STATE_OPEN_REQUEST_BODY) {
+            throw new IllegalStateException("state: " + state);
+        }
+        state = STATE_WRITING_REQUEST_BODY;
+        return new ChunkedSink();
+    }
+
+    private final class ChunkedSink implements Sink {
+        private final ForwardingTimeout timeout = new ForwardingTimeout(sink.timeout());
+        private boolean closed;
+
+        @Override
+        public void write(Buffer source, long byteCount) throws IOException {
+            if (closed) throw new IllegalStateException("closed");
+            if (byteCount == 0) return;
+
+            sink.writeHexadecimalUnsignedLong(byteCount);
+            sink.writeUtf8("\r\n");
+            sink.write(source, byteCount);
+            sink.writeUtf8("\r\n");
+        }
+
+        @Override
+        public void flush() throws IOException {
+            if (closed) return;
+            sink.flush();
+        }
+
+        @Override
+        public Timeout timeout() {
+            return timeout;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (closed) return;
+            closed = true;
+            sink.writeUtf8("0\r\n\r\n");
+            detachTimeout(timeout);
+            state = STATE_READ_RESPONSE_HEADERS;
+        }
+    }
+
+    /** An HTTP body with a fixed length known in advance. */
+    private final class FixedLengthSink implements Sink {
+        private final ForwardingTimeout timeout = new ForwardingTimeout(sink.timeout());
+        private boolean closed;
+        private long bytesRemaining;
+
+        private FixedLengthSink(long bytesRemaining) {
+            this.bytesRemaining = bytesRemaining;
+        }
+
+        @Override public Timeout timeout() {
+            return timeout;
+        }
+
+        @Override public void write(Buffer source, long byteCount) throws IOException {
+            if (closed) throw new IllegalStateException("closed");
+            checkOffsetAndCount(source.size(), 0, byteCount);
+            if (byteCount > bytesRemaining) {
+                throw new ProtocolException("expected " + bytesRemaining
+                        + " bytes but received " + byteCount);
+            }
+            sink.write(source, byteCount);
+            bytesRemaining -= byteCount;
+        }
+
+        @Override public void flush() throws IOException {
+            if (closed) return; // Don't throw; this stream might have been closed on the caller's behalf.
+            sink.flush();
+        }
+
+        @Override public void close() throws IOException {
+            if (closed) return;
+            closed = true;
+            if (bytesRemaining > 0) throw new ProtocolException("unexpected end of stream");
+            detachTimeout(timeout);
+            state = STATE_READ_RESPONSE_HEADERS;
+        }
     }
 
     @Override

@@ -55,10 +55,10 @@ public final class CallServerInterceptor implements Interceptor {
                     .build();
         }
 
-//        if ("close".equalsIgnoreCase(response.request().header("Connection"))
-//                || "close".equalsIgnoreCase(response.header("Connection"))) {
-//            streamAllocation.noNewStreams();
-//        }
+        if ("close".equalsIgnoreCase(response.request().header("Connection"))
+                || "close".equalsIgnoreCase(response.header("Connection"))) {
+            streamAllocation.noNewStreams();
+        }
 
         int code = response.code();
         if ((code == 204 || code == 205) && response.body().contentLength() > 0) {

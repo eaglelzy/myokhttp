@@ -22,6 +22,6 @@ public class RouteSelector {
 
     public Route next() throws IOException {
         return new Route(address, Proxy.NO_PROXY,
-                new InetSocketAddress(address.httpUrl().host(), address.httpUrl().port()));
+                new InetSocketAddress(address.url().host(), address.url().port()));
     }
 }

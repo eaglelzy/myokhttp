@@ -184,6 +184,6 @@ public class ConnectionPoolTest {
 
     private Route newRoute(Address address) {
         return new Route(address, Proxy.NO_PROXY,
-                InetSocketAddress.createUnresolved(address.httpUrl().host(), address.httpUrl().port()));
+                InetSocketAddress.createUnresolved(address.url().host(), address.url().port()));
     }
 }

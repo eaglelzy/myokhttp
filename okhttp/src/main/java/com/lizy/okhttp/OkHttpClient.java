@@ -5,15 +5,26 @@ import com.lizy.okhttp.internal.Util;
 import com.lizy.okhttp.internal.connection.RealConnection;
 import com.lizy.okhttp.internal.connection.RouteDatabase;
 import com.lizy.okhttp.internal.connection.StreamAllocation;
+import com.lizy.okhttp.internal.tls.CertificateChainCleaner;
+import com.lizy.okhttp.internal.tls.OkHostnameVerifier;
 
 import java.net.MalformedURLException;
 import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.UnknownHostException;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.util.Arrays;
 import java.util.List;
 
 import javax.net.SocketFactory;
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * Created by lizy on 16-8-30.
@@ -22,10 +33,8 @@ public final class OkHttpClient implements Cloneable, Call.Factory {
     private static final List<Protocol> DEFAULT_PROTOCOLS = Util.immutableList(
             Protocol.HTTP_2, Protocol.HTTP_1_1);
 
-    //    private static final List<ConnectionSpec> DEFAULT_CONNECTION_SPECS = Util.immutableList(
-//            ConnectionSpec.MODERN_TLS, ConnectionSpec.COMPATIBLE_TLS, ConnectionSpec.CLEARTEXT);
-    private static final List<ConnectionSpec> DEFAULT_CONNECTION_SPECS =
-            Util.immutableList(new ConnectionSpec());
+    private static final List<ConnectionSpec> DEFAULT_CONNECTION_SPECS = Util.immutableList(
+            ConnectionSpec.MODERN_TLS, ConnectionSpec.COMPATIBLE_TLS, ConnectionSpec.CLEARTEXT);
 
     static {
         Internal.instance = new Internal() {
@@ -54,7 +63,7 @@ public final class OkHttpClient implements Cloneable, Call.Factory {
 
             @Override
             public void apply(ConnectionSpec tlsConfiguration, SSLSocket sslSocket, boolean isFallback) {
-//                tlsConfiguration.apply(sslSocket, isFallback);
+                tlsConfiguration.apply(sslSocket, isFallback);
             }
 
             @Override public HttpUrl getHttpUrlChecked(String url)
@@ -68,6 +77,11 @@ public final class OkHttpClient implements Cloneable, Call.Factory {
             @Override
             public void addLenient(Headers.Builder builder, String line) {
                 builder.addLenient(line);
+            }
+
+            @Override
+            public void addLenient(Headers.Builder builder, String name, String value) {
+                builder.addLenient(name, value);
             }
         };
     }
@@ -83,6 +97,10 @@ public final class OkHttpClient implements Cloneable, Call.Factory {
     final Dns dns;
     final List<Protocol> protocols;
     final SocketFactory socketFactory;
+    final SSLSocketFactory sslSocketFactory;
+    final HostnameVerifier hostnameVerifier;
+    final CertificatePinner certificatePinner;
+    final CertificateChainCleaner certificateChainCleaner;
     final Proxy proxy;
     final Authenticator proxyAuthenticator;
     final Authenticator authenticator;
@@ -113,6 +131,56 @@ public final class OkHttpClient implements Cloneable, Call.Factory {
         this.connectionTimeout = builder.connectionTimeout;
         this.readTimeout = builder.readTimeout;
         this.writeTimeout = builder.writeTimeout;
+
+        if (builder.sslSocketFactory != null) {
+            this.sslSocketFactory = builder.sslSocketFactory;
+            this.certificateChainCleaner = builder.certificateChainCleaner;
+        } else {
+            X509TrustManager trustManager = systemDefaultTrustManager();
+            this.sslSocketFactory = systemDefaultSslSocketFactory(trustManager);
+            this.certificateChainCleaner = CertificateChainCleaner.get(trustManager);
+        }
+
+        this.hostnameVerifier = builder.hostnameVerifier;
+        this.certificatePinner = builder.certificatePinner.withCertificateChainCleaner(
+                certificateChainCleaner);
+    }
+
+    private X509TrustManager systemDefaultTrustManager() {
+        try {
+            TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
+                    TrustManagerFactory.getDefaultAlgorithm());
+            trustManagerFactory.init((KeyStore) null);
+            TrustManager[] trustManagers = trustManagerFactory.getTrustManagers();
+            if (trustManagers.length != 1 || !(trustManagers[0] instanceof X509TrustManager)) {
+                throw new IllegalStateException("Unexpected default trust managers:"
+                        + Arrays.toString(trustManagers));
+            }
+            return (X509TrustManager) trustManagers[0];
+        } catch (GeneralSecurityException e) {
+            throw new AssertionError(); // The system has no TLS. Just give up.
+        }
+    }
+
+    private SSLSocketFactory systemDefaultSslSocketFactory(X509TrustManager trustManager) {
+        try {
+            SSLContext sslContext = SSLContext.getInstance("TLS");
+            sslContext.init(null, new TrustManager[] { trustManager }, null);
+            return sslContext.getSocketFactory();
+        } catch (GeneralSecurityException e) {
+            throw new AssertionError(); // The system has no TLS. Just give up.
+        }
+    }
+
+    public HostnameVerifier hostnameVerifier() {
+        return hostnameVerifier;
+    }
+    public CertificatePinner certificatePinner() {
+        return certificatePinner;
+    }
+
+    public SSLSocketFactory sslSocketFactory() {
+        return sslSocketFactory;
     }
 
     public int connectionTimeout() {
@@ -167,6 +235,10 @@ public final class OkHttpClient implements Cloneable, Call.Factory {
         Dispatcher dispatcher;
         ConnectionPool connectionPool;
         SocketFactory socketFactory;
+        SSLSocketFactory sslSocketFactory;
+        HostnameVerifier hostnameVerifier;
+        CertificatePinner certificatePinner;
+        CertificateChainCleaner certificateChainCleaner;
         List<Protocol> protocols;
         List<ConnectionSpec> connectionSpecs;
         Proxy proxy;
@@ -186,6 +258,8 @@ public final class OkHttpClient implements Cloneable, Call.Factory {
             dns = Dns.SYSTEM;
             socketFactory = SocketFactory.getDefault();
             protocols = DEFAULT_PROTOCOLS;
+            hostnameVerifier = OkHostnameVerifier.INSTANCE;
+            certificatePinner = CertificatePinner.DEFAULT;
             proxySelector = ProxySelector.getDefault();
             proxyAuthenticator = Authenticator.NONE;
             authenticator = Authenticator.NONE;

@@ -57,7 +57,7 @@ public final class Address {
         this.certificatePinner = certificatePinner;
     }
 
-    public HttpUrl httpUrl() {
+    public HttpUrl url() {
         return httpUrl;
     }
 

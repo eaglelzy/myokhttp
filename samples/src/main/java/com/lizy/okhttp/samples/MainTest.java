@@ -14,23 +14,16 @@ public class MainTest {
         OkHttpClient client = new OkHttpClient();
 
         Request request = new Request.Builder()
-                .url(HttpUrl.parse("http://publicobject.com/helloworld.txt"))
+//                .url(HttpUrl.parse("http://publicobject.com/helloworld.txt"))
+                .url(HttpUrl.parse("https://api.github.com"))
+//                .url(HttpUrl.parse("https://kyfw.12306.cn/otn/"))
                 .build();
 
         Call call = client.newCall(request);
-
-        try {
-            Response response = call.execute();
-            System.out.println("response:" + response.body().string());
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        Call call1 = call.clone();
-        call1.enqueue(new Callback() {
+        call.enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-
+                System.out.println("failure:" + e);
             }
 
             @Override
